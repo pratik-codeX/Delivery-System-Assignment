@@ -1,329 +1,481 @@
-"""FastBox Delivery System Assignment.
+# FastBox Delivery System Assignment
+# Author : Pratik Nanaso Raut
+# Date   : 23/9/2026
 
-This program completes the required features from the assignment:
-
-1. Read delivery data from a JSON file.
-2. Assign each package to the nearest delivery agent.
-3. Simulate pickup and delivery distance for every package.
-4. Generate report.json with delivery count, distance, and efficiency.
-5. Optionally export the best agent to a CSV file.
-"""
-
-from __future__ import annotations
-
-import argparse
 import csv
 import json
 import math
-from pathlib import Path
-from typing import Any
+import sys
 
 
-# A point represents one location on the delivery map: (x, y).
-Point = tuple[float, float]
+DEFAULT_INPUT = "Python Assignment -2026/base_case.json"
+DEFAULT_OUTPUT = "report.json"
 
 
-# Default files used when the program is run without extra arguments.
-DEFAULT_INPUT = Path("Python Assignment -2026/base_case.json")
-DEFAULT_OUTPUT = Path("report.json")
+class DeliverySystem:
 
+    # ---------------------------------------------------------
+    # Function Name : __init__
+    # Description   : It stores input and output file names
+    # Input         : Input JSON file path, output report file path
+    # Output        : None
+    # Author        : Pratik Nanaso Raut
+    # Date          : 23/9/2026
+    # ---------------------------------------------------------
+    def __init__(self, input_file=DEFAULT_INPUT, output_file=DEFAULT_OUTPUT):
+        self.input_file = input_file
+        self.output_file = output_file
 
-# -----------------------------------------------------------------------------
-# Feature 1: Input validation and JSON loading
-# -----------------------------------------------------------------------------
+    # ---------------------------------------------------------
+    # Function Name : load_data
+    # Description   : It reads delivery data from JSON file
+    # Input         : JSON file path
+    # Output        : Dictionary containing delivery data
+    # Author        : Pratik Nanaso Raut
+    # Date          : 23/9/2026
+    # ---------------------------------------------------------
+    def load_data(self, file_name=None):
+        if file_name is None:
+            file_name = self.input_file
 
-def parse_point(value: Any, label: str) -> Point:
-    """Validate that a location is written as [x, y]."""
-    if not isinstance(value, list) or len(value) != 2:
-        raise ValueError(f"{label} must be a [x, y] coordinate")
+        try:
+            file = open(file_name, "r")
+            data = json.load(file)
+            file.close()
+        except FileNotFoundError:
+            raise ValueError("Input file not found")
+        except json.JSONDecodeError:
+            raise ValueError("Input file is not a valid JSON file")
 
-    x, y = value
-    if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
-        raise ValueError(f"{label} must contain numeric x and y values")
+        if type(data) != dict:
+            raise ValueError("Input data should be a JSON object")
 
-    return float(x), float(y)
+        return data
 
+    # ---------------------------------------------------------
+    # Function Name : check_point
+    # Description   : It checks whether location has valid x and y values
+    # Input         : Location value and field name
+    # Output        : Validated location
+    # Author        : Pratik Nanaso Raut
+    # Date          : 23/9/2026
+    # ---------------------------------------------------------
+    def check_point(self, point, name):
+        if type(point) != list:
+            raise ValueError(name + " should be a list")
 
-def load_delivery_data(path: str | Path) -> dict[str, Any]:
-    """Read and parse the JSON input file."""
-    input_path = Path(path)
-    with input_path.open("r", encoding="utf-8") as file:
-        data = json.load(file)
+        if len(point) != 2:
+            raise ValueError(name + " should contain x and y values")
 
-    if not isinstance(data, dict):
-        raise ValueError("Input JSON must contain an object at the top level")
+        if type(point[0]) not in [int, float] or type(point[1]) not in [int, float]:
+            raise ValueError(name + " should contain numeric values")
 
-    return data
+        return point
 
+    # ---------------------------------------------------------
+    # Function Name : check_main_data
+    # Description   : It checks required keys from input JSON data
+    # Input         : Complete delivery data
+    # Output        : None
+    # Author        : Pratik Nanaso Raut
+    # Date          : 23/9/2026
+    # ---------------------------------------------------------
+    def check_main_data(self, data):
+        if type(data) != dict:
+            raise ValueError("Input data should be a dictionary")
 
-# -----------------------------------------------------------------------------
-# Feature 2: Convert different input formats into one common format
-# -----------------------------------------------------------------------------
+        if "warehouses" not in data:
+            raise ValueError("warehouses key is missing")
 
-def normalize_locations(raw_locations: Any, section_name: str) -> dict[str, Point]:
-    """Normalize warehouse or agent locations.
+        if "agents" not in data:
+            raise ValueError("agents key is missing")
 
-    The assignment files contain two slightly different JSON styles.
+        if "packages" not in data:
+            raise ValueError("packages key is missing")
 
-    Style 1:
-        "W1": [0, 0]
+        if type(data["packages"]) != list:
+            raise ValueError("packages should be a list")
 
-    Style 2:
-        {"id": "W1", "location": [0, 0]}
+    # ---------------------------------------------------------
+    # Function Name : prepare_locations
+    # Description   : It converts warehouse or agent locations into simple format
+    # Input         : Warehouse or agent data from JSON file
+    # Output        : Dictionary of id and location
+    # Author        : Pratik Nanaso Raut
+    # Date          : 23/9/2026
+    # ---------------------------------------------------------
+    def prepare_locations(self, data, title):
+        locations = {}
 
-    This function converts both styles into:
-        {"W1": (0.0, 0.0)}
-    """
-    locations: dict[str, Point] = {}
+        # Most test cases store data like: "W1": [0, 0]
+        if type(data) == dict:
+            for name in data:
+                if type(name) != str:
+                    raise ValueError(title + " id should be a string")
 
-    # Format used by most test cases: {"W1": [0, 0], "W2": [50, 75]}
-    if isinstance(raw_locations, dict):
-        for location_id, coordinates in raw_locations.items():
-            if not isinstance(location_id, str):
-                raise ValueError(f"{section_name} ids must be strings")
+                locations[name] = self.check_point(data[name], title + " " + name)
 
-            locations[location_id] = parse_point(
-                coordinates,
-                f"{section_name}.{location_id}",
-            )
+        # base_case.json stores data like: {"id": "W1", "location": [0, 0]}
+        elif type(data) == list:
+            for item in data:
+                if type(item) != dict:
+                    raise ValueError(title + " item should be a dictionary")
+
+                if "id" not in item or "location" not in item:
+                    raise ValueError(title + " item should contain id and location")
+
+                if type(item["id"]) != str:
+                    raise ValueError(title + " id should be a string")
+
+                locations[item["id"]] = self.check_point(item["location"], title + " " + item["id"])
+
+        else:
+            raise ValueError(title + " should be a dictionary or list")
+
         return locations
 
-    # Format used by base_case.json: [{"id": "W1", "location": [0, 0]}]
-    if isinstance(raw_locations, list):
-        for index, item in enumerate(raw_locations):
-            if not isinstance(item, dict):
-                raise ValueError(f"{section_name}[{index}] must be an object")
+    # ---------------------------------------------------------
+    # Function Name : prepare_packages
+    # Description   : It converts package details into one common format
+    # Input         : Package data from JSON file
+    # Output        : List of packages with id, warehouse and destination
+    # Author        : Pratik Nanaso Raut
+    # Date          : 23/9/2026
+    # ---------------------------------------------------------
+    def prepare_packages(self, data):
+        packages = []
+        ids = []
 
-            location_id = item.get("id")
-            if not isinstance(location_id, str):
-                raise ValueError(f"{section_name}[{index}].id must be a string")
+        for package in data:
+            if type(package) != dict:
+                raise ValueError("package should be a dictionary")
 
-            locations[location_id] = parse_point(
-                item.get("location"),
-                f"{section_name}.{location_id}.location",
-            )
-        return locations
+            if "id" not in package:
+                raise ValueError("package id is missing")
 
-    raise ValueError(f"{section_name} must be an object or a list")
+            if type(package["id"]) != str:
+                raise ValueError("package id should be a string")
 
+            if package["id"] in ids:
+                raise ValueError("duplicate package id found")
 
-def normalize_packages(raw_packages: Any) -> list[dict[str, Any]]:
-    """Normalize package records before simulation starts."""
-    if not isinstance(raw_packages, list):
-        raise ValueError("packages must be a list")
+            ids.append(package["id"])
 
-    packages: list[dict[str, Any]] = []
-    seen_package_ids: set[str] = set()
+            item = {}
+            item["id"] = package["id"]
 
-    for index, item in enumerate(raw_packages):
-        if not isinstance(item, dict):
-            raise ValueError(f"packages[{index}] must be an object")
+            # Some files use warehouse and base_case.json uses warehouse_id.
+            if "warehouse" in package:
+                item["warehouse"] = package["warehouse"]
+            elif "warehouse_id" in package:
+                item["warehouse"] = package["warehouse_id"]
+            else:
+                raise ValueError("warehouse is missing for package " + package["id"])
 
-        package_id = item.get("id")
-        if not isinstance(package_id, str):
-            raise ValueError(f"packages[{index}].id must be a string")
-        if package_id in seen_package_ids:
-            raise ValueError(f"Duplicate package id: {package_id}")
-        seen_package_ids.add(package_id)
+            if type(item["warehouse"]) != str:
+                raise ValueError("warehouse id should be a string")
 
-        # Some files call this field "warehouse" and base_case.json calls it
-        # "warehouse_id", so both names are accepted.
-        warehouse_id = item.get("warehouse", item.get("warehouse_id"))
-        if not isinstance(warehouse_id, str):
-            raise ValueError(f"{package_id} must include warehouse or warehouse_id")
+            if "destination" not in package:
+                raise ValueError("destination is missing for package " + package["id"])
 
-        packages.append(
-            {
-                "id": package_id,
-                "warehouse_id": warehouse_id,
-                "destination": parse_point(
-                    item.get("destination"),
-                    f"{package_id}.destination",
-                ),
-            }
-        )
+            item["destination"] = self.check_point(package["destination"], "destination of " + package["id"])
+            packages.append(item)
 
-    return packages
+        return packages
 
+    # ---------------------------------------------------------
+    # Function Name : calculate_distance
+    # Description   : It calculates Euclidean distance between two points
+    # Input         : Start location and end location
+    # Output        : Distance between both points
+    # Author        : Pratik Nanaso Raut
+    # Date          : 23/9/2026
+    # ---------------------------------------------------------
+    def calculate_distance(self, start, end):
+        x = end[0] - start[0]
+        y = end[1] - start[1]
 
-# -----------------------------------------------------------------------------
-# Feature 3: Distance calculation and nearest-agent assignment
-# -----------------------------------------------------------------------------
+        distance = math.sqrt((x * x) + (y * y))
+        return distance
 
-def distance(start: Point, end: Point) -> float:
-    """Calculate Euclidean distance between two locations."""
-    return math.hypot(end[0] - start[0], end[1] - start[1])
+    # ---------------------------------------------------------
+    # Function Name : find_nearest_agent
+    # Description   : It finds nearest agent from given warehouse location
+    # Input         : Warehouse location and all agent locations
+    # Output        : Agent id of nearest agent
+    # Author        : Pratik Nanaso Raut
+    # Date          : 23/9/2026
+    # ---------------------------------------------------------
+    def find_nearest_agent(self, warehouse, agents):
+        if len(agents) == 0:
+            raise ValueError("No agents available")
 
+        nearest_agent = None
+        nearest_distance = None
 
-def nearest_agent(warehouse_location: Point, agent_locations: dict[str, Point]) -> str:
-    """Find the agent closest to the package warehouse."""
-    if not agent_locations:
-        raise ValueError("At least one agent is required")
+        for agent in agents:
+            distance = self.calculate_distance(agents[agent], warehouse)
 
-    # If two agents are at the same distance, agent id is used as a stable tie-breaker.
-    return min(
-        agent_locations,
-        key=lambda agent_id: (distance(agent_locations[agent_id], warehouse_location), agent_id),
-    )
+            if nearest_distance is None:
+                nearest_distance = distance
+                nearest_agent = agent
+            elif distance < nearest_distance:
+                nearest_distance = distance
+                nearest_agent = agent
+            elif distance == nearest_distance and agent < nearest_agent:
+                nearest_agent = agent
 
+        return nearest_agent
 
-# -----------------------------------------------------------------------------
-# Feature 4: Delivery simulation and report generation
-# -----------------------------------------------------------------------------
+    # ---------------------------------------------------------
+    # Function Name : create_empty_report
+    # Description   : It creates blank report data for all agents
+    # Input         : Agents dictionary
+    # Output        : Report dictionary with default values
+    # Author        : Pratik Nanaso Raut
+    # Date          : 23/9/2026
+    # ---------------------------------------------------------
+    def create_empty_report(self, agents):
+        report = {}
 
-def simulate_deliveries(data: dict[str, Any]) -> dict[str, Any]:
-    """Assign packages, simulate delivery routes, and build the report."""
-    warehouses = normalize_locations(data.get("warehouses"), "warehouses")
-    agents = normalize_locations(data.get("agents"), "agents")
-    packages = normalize_packages(data.get("packages"))
+        for agent in agents:
+            report[agent] = {}
+            report[agent]["packages_delivered"] = 0
+            report[agent]["delivered_package_ids"] = []
+            report[agent]["total_distance"] = 0.0
+            report[agent]["efficiency"] = 0.0
 
-    # Each agent starts from the location given in the input file.
-    # After a delivery, the agent's current location becomes the destination.
-    agent_positions = dict(agents)
+        return report
 
-    # Create an empty report section for every agent.
-    agent_reports: dict[str, dict[str, Any]] = {
-        agent_id: {
-            "packages_delivered": 0,
-            "delivered_package_ids": [],
-            "total_distance": 0.0,
-            "efficiency": 0.0,
-        }
-        for agent_id in agents
-    }
+    # ---------------------------------------------------------
+    # Function Name : find_best_agent
+    # Description   : It finds agent with lowest average distance per package
+    # Input         : Final report dictionary
+    # Output        : Best agent id
+    # Author        : Pratik Nanaso Raut
+    # Date          : 23/9/2026
+    # ---------------------------------------------------------
+    def find_best_agent(self, report):
+        best_agent = None
+        best_average = None
+        best_distance = None
 
-    for package in packages:
-        warehouse_id = package["warehouse_id"]
-        if warehouse_id not in warehouses:
-            raise ValueError(f"Unknown warehouse '{warehouse_id}' for package {package['id']}")
+        for agent in report:
+            count = report[agent]["packages_delivered"]
 
-        warehouse_location = warehouses[warehouse_id]
+            if count > 0:
+                average = report[agent]["efficiency"]
+                distance = report[agent]["total_distance"]
 
-        # Assignment rule from the problem statement:
-        # choose the nearest agent based on agent location to warehouse location.
-        agent_id = nearest_agent(warehouse_location, agents)
+                if best_agent is None:
+                    best_agent = agent
+                    best_average = average
+                    best_distance = distance
+                elif average < best_average:
+                    best_agent = agent
+                    best_average = average
+                    best_distance = distance
+                elif average == best_average:
+                    if distance < best_distance:
+                        best_agent = agent
+                        best_distance = distance
+                    elif distance == best_distance and agent < best_agent:
+                        best_agent = agent
 
-        # Trip distance = agent's current position -> warehouse -> destination.
-        pickup_distance = distance(agent_positions[agent_id], warehouse_location)
-        delivery_distance = distance(warehouse_location, package["destination"])
-        trip_distance = pickup_distance + delivery_distance
+        return best_agent
 
-        # Update this agent's report after the package is delivered.
-        report_entry = agent_reports[agent_id]
-        report_entry["packages_delivered"] += 1
-        report_entry["delivered_package_ids"].append(package["id"])
-        report_entry["total_distance"] += trip_distance
+    # ---------------------------------------------------------
+    # Function Name : simulate_deliveries
+    # Description   : It assigns packages, calculates distance and prepares report
+    # Input         : Delivery data dictionary
+    # Output        : Final report dictionary
+    # Author        : Pratik Nanaso Raut
+    # Date          : 23/9/2026
+    # ---------------------------------------------------------
+    def simulate_deliveries(self, data):
+        self.check_main_data(data)
 
-        # The agent is now located at the package destination.
-        agent_positions[agent_id] = package["destination"]
+        warehouses = self.prepare_locations(data["warehouses"], "warehouse")
+        agents = self.prepare_locations(data["agents"], "agent")
+        packages = self.prepare_packages(data["packages"])
 
-    for report_entry in agent_reports.values():
-        delivered_count = report_entry["packages_delivered"]
-        report_entry["total_distance"] = round(report_entry["total_distance"], 2)
+        if len(agents) == 0 and len(packages) > 0:
+            raise ValueError("No agents available for delivery")
 
-        # Efficiency is average distance per delivered package.
-        report_entry["efficiency"] = (
-            round(report_entry["total_distance"] / delivered_count, 2)
-            if delivered_count
-            else 0.0
-        )
+        # Current position changes after each delivery.
+        positions = {}
+        for agent in agents:
+            positions[agent] = agents[agent]
 
-    active_agents = [
-        agent_id
-        for agent_id, report_entry in agent_reports.items()
-        if report_entry["packages_delivered"] > 0
-    ]
+        report = self.create_empty_report(agents)
 
-    # Best agent = lowest efficiency. Total distance and id are tie-breakers.
-    best_agent = (
-        min(
-            active_agents,
-            key=lambda agent_id: (
-                agent_reports[agent_id]["efficiency"],
-                agent_reports[agent_id]["total_distance"],
-                agent_id,
-            ),
-        )
-        if active_agents
-        else None
-    )
+        for package in packages:
+            package_id = package["id"]
+            warehouse_id = package["warehouse"]
 
-    return {**agent_reports, "best_agent": best_agent}
+            if warehouse_id not in warehouses:
+                raise ValueError("warehouse " + warehouse_id + " not found")
 
+            warehouse = warehouses[warehouse_id]
+            destination = package["destination"]
 
-# -----------------------------------------------------------------------------
-# Feature 5: Save output files
-# -----------------------------------------------------------------------------
+            # Package is assigned to the nearest agent from the warehouse.
+            agent = self.find_nearest_agent(warehouse, agents)
 
-def write_report(report: dict[str, Any], output_path: str | Path) -> None:
-    """Save the final report to report.json."""
-    destination = Path(output_path)
-    with destination.open("w", encoding="utf-8") as file:
-        json.dump(report, file, indent=2)
-        file.write("\n")
+            # Total trip = current agent position to warehouse plus warehouse to destination.
+            pickup_distance = self.calculate_distance(positions[agent], warehouse)
+            delivery_distance = self.calculate_distance(warehouse, destination)
+            total_distance = pickup_distance + delivery_distance
 
+            report[agent]["packages_delivered"] = report[agent]["packages_delivered"] + 1
+            report[agent]["delivered_package_ids"].append(package_id)
+            report[agent]["total_distance"] = report[agent]["total_distance"] + total_distance
 
-def export_top_performer(report: dict[str, Any], output_path: str | Path) -> None:
-    """Bonus feature: Save the best agent details to a CSV file."""
-    best_agent = report.get("best_agent")
-    if best_agent is None:
-        return
+            # Agent reaches destination after delivering the package.
+            positions[agent] = destination
 
-    best_agent_report = report[best_agent]
-    with Path(output_path).open("w", newline="", encoding="utf-8") as file:
-        writer = csv.writer(file)
-        writer.writerow(["agent_id", "packages_delivered", "total_distance", "efficiency"])
-        writer.writerow(
-            [
+        for agent in report:
+            count = report[agent]["packages_delivered"]
+            total_distance = round(report[agent]["total_distance"], 2)
+            report[agent]["total_distance"] = total_distance
+
+            if count > 0:
+                report[agent]["efficiency"] = round(total_distance / count, 2)
+            else:
+                report[agent]["efficiency"] = 0.0
+
+        report["best_agent"] = self.find_best_agent(report)
+        return report
+
+    # ---------------------------------------------------------
+    # Function Name : save_report
+    # Description   : It saves final delivery report into report.json file
+    # Input         : Report dictionary and output file name
+    # Output        : report.json file
+    # Author        : Pratik Nanaso Raut
+    # Date          : 23/9/2026
+    # ---------------------------------------------------------
+    def save_report(self, report, file_name=None):
+        if file_name is None:
+            file_name = self.output_file
+
+        try:
+            file = open(file_name, "w")
+            json.dump(report, file, indent=2)
+            file.write("\n")
+            file.close()
+        except OSError:
+            raise ValueError("Unable to write report file")
+
+    # ---------------------------------------------------------
+    # Function Name : export_top_performer
+    # Description   : It exports best agent details into CSV file
+    # Input         : Report dictionary and CSV file name
+    # Output        : CSV file with best agent details
+    # Author        : Pratik Nanaso Raut
+    # Date          : 23/9/2026
+    # ---------------------------------------------------------
+    def export_top_performer(self, report, file_name):
+        best_agent = report["best_agent"]
+
+        if best_agent is None:
+            return
+
+        try:
+            file = open(file_name, "w", newline="")
+            writer = csv.writer(file)
+
+            writer.writerow(["agent_id", "packages_delivered", "total_distance", "efficiency"])
+            writer.writerow([
                 best_agent,
-                best_agent_report["packages_delivered"],
-                best_agent_report["total_distance"],
-                best_agent_report["efficiency"],
-            ]
-        )
+                report[best_agent]["packages_delivered"],
+                report[best_agent]["total_distance"],
+                report[best_agent]["efficiency"]
+            ])
+
+            file.close()
+        except OSError:
+            raise ValueError("Unable to write CSV file")
+
+    # ---------------------------------------------------------
+    # Function Name : run
+    # Description   : It executes the complete delivery system flow
+    # Input         : None
+    # Output        : Creates report.json file
+    # Author        : Pratik Nanaso Raut
+    # Date          : 23/9/2026
+    # ---------------------------------------------------------
+    def run(self):
+        data = self.load_data()
+        report = self.simulate_deliveries(data)
+        self.save_report(report)
+
+        print("Report saved to", self.output_file)
+        print("Best agent:", report["best_agent"])
 
 
-# -----------------------------------------------------------------------------
-# Program entry point
-# -----------------------------------------------------------------------------
-
-def build_parser() -> argparse.ArgumentParser:
-    """Create command-line options for input, output, and optional CSV export."""
-    parser = argparse.ArgumentParser(description="Simulate one day of FastBox deliveries.")
-    parser.add_argument(
-        "input_json",
-        nargs="?",
-        default=DEFAULT_INPUT,
-        help=f"Input JSON file. Defaults to {DEFAULT_INPUT}",
-    )
-    parser.add_argument(
-        "-o",
-        "--output",
-        default=DEFAULT_OUTPUT,
-        help=f"Report output path. Defaults to {DEFAULT_OUTPUT}",
-    )
-    parser.add_argument(
-        "--top-csv",
-        help="Optional bonus CSV path for exporting the top performer.",
-    )
-    return parser
+# ---------------------------------------------------------
+# Function Name : load_delivery_data
+# Description   : It loads JSON data, used by test cases
+# Input         : JSON file path
+# Output        : Dictionary containing delivery data
+# Author        : Pratik Nanaso Raut
+# Date          : 23/9/2026
+# ---------------------------------------------------------
+def load_delivery_data(file_name):
+    app = DeliverySystem(file_name)
+    return app.load_data(file_name)
 
 
-def main() -> None:
-    """Run the complete delivery simulation."""
-    parser = build_parser()
-    args = parser.parse_args()
+# ---------------------------------------------------------
+# Function Name : simulate_deliveries
+# Description   : It simulates deliveries, used by test cases
+# Input         : Delivery data dictionary
+# Output        : Final report dictionary
+# Author        : Pratik Nanaso Raut
+# Date          : 23/9/2026
+# ---------------------------------------------------------
+def simulate_deliveries(data):
+    app = DeliverySystem()
+    return app.simulate_deliveries(data)
 
-    data = load_delivery_data(args.input_json)
-    report = simulate_deliveries(data)
-    write_report(report, args.output)
 
-    if args.top_csv:
-        export_top_performer(report, args.top_csv)
+# ---------------------------------------------------------
+# Function Name : main
+# Description   : It starts the program and handles command line input
+# Input         : Optional input file, output file and CSV file from terminal
+# Output        : Creates report.json and optional CSV file
+# Author        : Pratik Nanaso Raut
+# Date          : 23/9/2026
+# ---------------------------------------------------------
+def main():
+    input_file = DEFAULT_INPUT
+    output_file = DEFAULT_OUTPUT
+    csv_file = None
 
-    print(f"Report saved to {args.output}")
-    if report["best_agent"] is not None:
-        print(f"Best agent: {report['best_agent']}")
+    if len(sys.argv) > 1:
+        input_file = sys.argv[1]
+
+    if len(sys.argv) > 2:
+        output_file = sys.argv[2]
+
+    if len(sys.argv) > 3:
+        csv_file = sys.argv[3]
+
+    try:
+        app = DeliverySystem(input_file, output_file)
+        data = app.load_data()
+        report = app.simulate_deliveries(data)
+        app.save_report(report)
+
+        if csv_file is not None:
+            app.export_top_performer(report, csv_file)
+
+        print("Report saved to", output_file)
+        print("Best agent:", report["best_agent"])
+    except ValueError as error:
+        print("Error:", error)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

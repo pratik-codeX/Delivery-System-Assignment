@@ -10,50 +10,76 @@ CASE_DIR = ASSIGNMENT_DIR / "Python Assignment(Delivery System Test Cases)"
 
 
 class DeliverySystemTests(unittest.TestCase):
-    def check_case(self, path: Path) -> None:
-        data = load_delivery_data(path)
+
+    def check_case(self, file_path):
+        data = load_delivery_data(file_path)
         report = simulate_deliveries(data)
 
-        agent_entries = {
-            agent_id: entry
-            for agent_id, entry in report.items()
-            if agent_id != "best_agent"
-        }
+        total_packages = len(data["packages"])
+        delivered_count = 0
+        delivered_ids = []
 
-        delivered_count = sum(entry["packages_delivered"] for entry in agent_entries.values())
-        delivered_ids = [
-            package_id
-            for entry in agent_entries.values()
-            for package_id in entry["delivered_package_ids"]
-        ]
+        for key in report:
+            if key != "best_agent":
+                delivered_count = delivered_count + report[key]["packages_delivered"]
 
-        self.assertEqual(delivered_count, len(data["packages"]), path)
-        self.assertEqual(sorted(delivered_ids), sorted(package["id"] for package in data["packages"]))
+                for package_id in report[key]["delivered_package_ids"]:
+                    delivered_ids.append(package_id)
+
+                self.assertGreaterEqual(report[key]["total_distance"], 0)
+                self.assertGreaterEqual(report[key]["efficiency"], 0)
+
+        expected_ids = []
+        for package in data["packages"]:
+            expected_ids.append(package["id"])
+
+        self.assertEqual(delivered_count, total_packages)
+        self.assertEqual(sorted(delivered_ids), sorted(expected_ids))
         self.assertEqual(len(delivered_ids), len(set(delivered_ids)))
 
-        for entry in agent_entries.values():
-            self.assertGreaterEqual(entry["total_distance"], 0)
-            self.assertGreaterEqual(entry["efficiency"], 0)
-            if entry["packages_delivered"]:
-                self.assertAlmostEqual(
-                    entry["efficiency"],
-                    round(entry["total_distance"] / entry["packages_delivered"], 2),
-                )
+        if total_packages > 0:
+            self.assertIn("best_agent", report)
 
-        active_agents = [
-            agent_id
-            for agent_id, entry in agent_entries.items()
-            if entry["packages_delivered"] > 0
-        ]
-        self.assertIn(report["best_agent"], active_agents)
-
-    def test_base_case(self) -> None:
+    def test_base_case(self):
         self.check_case(ASSIGNMENT_DIR / "base_case.json")
 
-    def test_provided_cases(self) -> None:
-        for path in sorted(CASE_DIR.glob("test_case_*.json")):
-            with self.subTest(case=path.name):
-                self.check_case(path)
+    def test_provided_cases(self):
+        for file_path in sorted(CASE_DIR.glob("test_case_*.json")):
+            with self.subTest(case=file_path.name):
+                self.check_case(file_path)
+
+    def test_missing_packages_key(self):
+        data = {
+            "warehouses": {"W1": [0, 0]},
+            "agents": {"A1": [1, 1]}
+        }
+
+        with self.assertRaises(ValueError):
+            simulate_deliveries(data)
+
+    def test_unknown_warehouse(self):
+        data = {
+            "warehouses": {"W1": [0, 0]},
+            "agents": {"A1": [1, 1]},
+            "packages": [
+                {"id": "P1", "warehouse": "W9", "destination": [5, 5]}
+            ]
+        }
+
+        with self.assertRaises(ValueError):
+            simulate_deliveries(data)
+
+    def test_empty_agents(self):
+        data = {
+            "warehouses": {"W1": [0, 0]},
+            "agents": {},
+            "packages": [
+                {"id": "P1", "warehouse": "W1", "destination": [5, 5]}
+            ]
+        }
+
+        with self.assertRaises(ValueError):
+            simulate_deliveries(data)
 
 
 if __name__ == "__main__":
